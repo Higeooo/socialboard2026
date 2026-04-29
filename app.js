@@ -1,5 +1,5 @@
 /* ============================================================
-   MAP — Modum Activity Platform (frontend)
+   SOCIAL BOARD (frontend) v2
    ============================================================ */
 
 // ⚠ 배포 후 본인의 GAS Web App URL로 교체하세요.
@@ -7,10 +7,15 @@ const GAS_URL = 'https://script.google.com/macros/s/AKfycbyaCEAIxjAwBZPhp3dYlU-2
 
 // ----------- 전역 상태 -----------
 const state = {
-  user: null,         // { sid, name, klass } or { admin: true }
-  adminToken: null,   // 관리자 토큰
+  user: null,         // { sid, name, klass } 또는 { admin: true, sid, name }
+  adminToken: null,
   semester: '2026-1',
-  cur: { classId: null, className: '', activityId: null, activityTitle: '' }
+  cur: {
+    classId: null, className: '',
+    activityId: null, activityTitle: '', activityType: 'mixed',
+    columnsCreated: false,
+    groups: []
+  }
 };
 
 // ----------- 유틸 -----------
@@ -46,6 +51,8 @@ function show(screenId) {
   $('#topbar').hidden = (screenId === 'screen-login');
 }
 
+function isAdmin() { return !!(state.user && state.user.admin); }
+
 // ----------- API -----------
 async function api(action, payload = {}) {
   if (!GAS_URL || GAS_URL.startsWith('PASTE_')) {
@@ -64,13 +71,13 @@ async function api(action, payload = {}) {
 
 // ----------- 세션 -----------
 function saveSession() {
-  sessionStorage.setItem('map.session', JSON.stringify({
+  sessionStorage.setItem('sb.session', JSON.stringify({
     user: state.user, adminToken: state.adminToken, semester: state.semester
   }));
 }
 function loadSession() {
   try {
-    const raw = sessionStorage.getItem('map.session');
+    const raw = sessionStorage.getItem('sb.session');
     if (!raw) return false;
     const s = JSON.parse(raw);
     if (s.user) {
@@ -83,7 +90,7 @@ function loadSession() {
   return false;
 }
 function clearSession() {
-  sessionStorage.removeItem('map.session');
+  sessionStorage.removeItem('sb.session');
   state.user = null; state.adminToken = null;
 }
 
@@ -126,7 +133,6 @@ function logout() {
 //  진입 후 공통 처리
 // ============================================================
 async function enterApp() {
-  // 활성 학기 조회
   try {
     const m = await api('meta.activeSemester', {});
     state.semester = m.semester;
@@ -141,17 +147,16 @@ async function enterApp() {
     : `<span>${escapeHtml(u.sid)}</span>&nbsp;${escapeHtml(u.name)}`;
 
   // 관리자 전용 버튼
-  const isAdmin = !!state.user.admin;
-  $('#btn-new-class').hidden = !isAdmin;
-  $('#btn-new-activity').hidden = !isAdmin;
-  $('#btn-export').hidden = !isAdmin;
+  $('#btn-new-class').hidden = !isAdmin();
+  $('#btn-new-activity').hidden = !isAdmin();
+  $('#btn-export').hidden = !isAdmin();
 
   await renderClasses();
   show('screen-classes');
 }
 
 // ============================================================
-//  반 목록
+//  반 목록 (요구사항 5: 날짜 제거)
 // ============================================================
 async function renderClasses() {
   const grid = $('#class-grid');
@@ -159,14 +164,15 @@ async function renderClasses() {
   try {
     const list = await api('class.list', { semester: state.semester });
     if (!list.length) {
-      grid.innerHTML = `<div class="empty"><strong>아직 등록된 반이 없습니다.</strong>${state.user.admin ? '오른쪽 위의 “반 만들기”로 시작하세요.' : '담당 교사가 반을 생성하면 표시됩니다.'}</div>`;
+      grid.innerHTML = `<div class="empty"><strong>아직 등록된 반이 없습니다.</strong>${
+        isAdmin() ? '오른쪽 위의 "반 만들기"로 시작하세요.' : '담당 교사가 반을 생성하면 표시됩니다.'
+      }</div>`;
       return;
     }
     grid.innerHTML = list.map(c => `
       <button class="class-card" data-class-id="${c.classId}">
         <div class="cc-name">${escapeHtml(c.className)}</div>
-        <div class="cc-meta">생성: ${fmtDate(c.createdAt)}</div>
-        ${state.user.admin ? `
+        ${isAdmin() ? `
           <div class="cc-actions">
             <span class="mini-btn danger" data-action="del-class" data-id="${c.classId}">삭제</span>
           </div>` : ''}
@@ -175,7 +181,7 @@ async function renderClasses() {
 
     grid.querySelectorAll('.class-card').forEach(btn => {
       btn.addEventListener('click', e => {
-        if (e.target.dataset.action === 'del-class') return; // 삭제는 따로
+        if (e.target.dataset.action === 'del-class') return;
         openClass(btn.dataset.classId, btn.querySelector('.cc-name').textContent);
       });
     });
@@ -221,38 +227,42 @@ async function renderActivities() {
   try {
     const list = await api('activity.list', { semester: state.semester, classId: state.cur.classId });
     if (!list.length) {
-      root.innerHTML = `<div class="empty"><strong>등록된 활동이 없습니다.</strong>${state.user.admin ? '오른쪽 위 “활동 만들기”로 시작하세요.' : '담당 교사가 활동을 생성하면 표시됩니다.'}</div>`;
+      root.innerHTML = `<div class="empty"><strong>등록된 활동이 없습니다.</strong>${
+        isAdmin() ? '오른쪽 위 "활동 만들기"로 시작하세요.' : '담당 교사가 활동을 생성하면 표시됩니다.'
+      }</div>`;
       return;
     }
     root.innerHTML = list.map(a => {
       const isInq = a.type === 'inquiry';
       return `
-        <div class="activity-card" data-id="${a.activityId}" data-title="${escapeHtml(a.title)}">
+        <div class="activity-card" data-id="${a.activityId}" data-title="${escapeHtml(a.title)}" data-type="${escapeHtml(a.type || 'mixed')}" data-cols="${a.columnsCreated === true || a.columnsCreated === 'TRUE' || a.columnsCreated === 'true' ? '1' : '0'}">
           <div class="activity-icon ${isInq ? 'inquiry' : ''}">${isInq ? '🔎' : '📋'}</div>
           <div>
             <div class="a-title">${escapeHtml(a.title)}</div>
             <div class="a-desc">${escapeHtml(a.description || (isInq ? '탐구 질문 5단계 활동' : '일반 모둠 활동'))}</div>
           </div>
           <div class="a-actions">
-            ${state.user.admin ? `<button class="btn-ghost" data-action="del-activity" data-id="${a.activityId}">삭제</button>` : ''}
-            <button class="btn-primary" data-action="open" data-id="${a.activityId}" data-title="${escapeHtml(a.title)}">입장 →</button>
+            ${isAdmin() ? `<button class="btn-ghost" data-action="del-activity" data-id="${a.activityId}">삭제</button>` : ''}
+            <button class="btn-primary" data-action="open">입장 →</button>
           </div>
         </div>`;
     }).join('');
 
-    root.querySelectorAll('[data-action="open"]').forEach(b => {
-      b.addEventListener('click', e => {
-        e.stopPropagation();
-        openActivity(b.dataset.id, b.dataset.title);
+    root.querySelectorAll('.activity-card').forEach(card => {
+      card.addEventListener('click', e => {
+        if (e.target.closest('[data-action="del-activity"]')) return;
+        openActivity({
+          activityId: card.dataset.id,
+          title: card.dataset.title,
+          type: card.dataset.type,
+          columnsCreated: card.dataset.cols === '1'
+        });
       });
-    });
-    root.querySelectorAll('.activity-card').forEach(c => {
-      c.addEventListener('click', () => openActivity(c.dataset.id, c.dataset.title));
     });
     root.querySelectorAll('[data-action="del-activity"]').forEach(b => {
       b.addEventListener('click', async e => {
         e.stopPropagation();
-        if (!confirm('이 활동과 그 안의 모든 모둠·게시물이 삭제됩니다.')) return;
+        if (!confirm('이 활동과 그 안의 모든 조·게시물이 삭제됩니다.')) return;
         try {
           await api('activity.delete', { semester: state.semester, activityId: b.dataset.id, token: state.adminToken });
           toast('활동을 삭제했습니다.', 'success');
@@ -279,56 +289,112 @@ async function newActivity() {
 }
 
 // ============================================================
-//  게시판 (모둠 + 게시물)
+//  보드 (자유 게시 OR 8 컬럼)
 // ============================================================
-async function openActivity(activityId, title) {
-  state.cur.activityId = activityId;
-  state.cur.activityTitle = title;
-  $('#cur-activity-title').textContent = state.cur.className + ' / ' + title;
-  $('#cur-activity-sub').textContent = state.semester + '학기';
+async function openActivity(act) {
+  state.cur.activityId = act.activityId;
+  state.cur.activityTitle = act.title;
+  state.cur.activityType = act.type || 'mixed';
+  state.cur.columnsCreated = !!act.columnsCreated;
+  $('#cur-activity-title').textContent = state.cur.className + ' / ' + act.title;
+  $('#cur-activity-sub').textContent = state.semester + '학기' + (act.type === 'inquiry' ? ' · 탐구 5단계' : '');
   show('screen-board');
-  await renderGroupsAndPosts();
+  await refreshBoard();
 }
 
-async function renderGroupsAndPosts() {
-  const area = $('#groups-area');
-  area.innerHTML = '<p class="muted">불러오는 중…</p>';
+async function refreshBoard() {
+  // 활동 메타 다시 조회 (columnsCreated 동기화)
   try {
-    const [groups, posts] = await Promise.all([
-      api('group.list', { semester: state.semester, activityId: state.cur.activityId }),
-      api('post.list',  { semester: state.semester, includeHidden: !!state.user.admin })
-    ]);
-    const myGroupPosts = posts.filter(p => groups.some(g => g.groupId === p.groupId));
-    if (!groups.length) {
-      area.innerHTML = `<div class="empty"><strong>아직 모둠(조)이 없습니다.</strong>“+ 조 만들기”를 눌러 시작하세요.</div>`;
-      return;
-    }
-    area.innerHTML = groups.map(g => renderGroupCol(g, myGroupPosts.filter(p => p.groupId === g.groupId))).join('');
-    bindGroupEvents();
-  } catch (e) { area.innerHTML = `<p class="muted">오류: ${escapeHtml(e.message)}</p>`; }
+    const a = await api('activity.get', { semester: state.semester, activityId: state.cur.activityId });
+    state.cur.columnsCreated = (a.columnsCreated === true || a.columnsCreated === 'TRUE' || a.columnsCreated === 'true');
+  } catch {}
+
+  // 버튼 상태
+  $('#btn-make-columns').hidden = !(isAdmin() && !state.cur.columnsCreated);
+
+  // 데이터 로드
+  const [groups, posts] = await Promise.all([
+    api('group.list', { semester: state.semester, activityId: state.cur.activityId }),
+    api('post.list',  { semester: state.semester, activityId: state.cur.activityId, includeHidden: isAdmin() })
+  ]);
+  state.cur.groups = groups;
+
+  if (state.cur.columnsCreated && groups.length > 0) {
+    renderColumns(groups, posts);
+    $('#columns-area').hidden = false;
+    $('#free-area').hidden = true;
+  } else {
+    renderFreePosts(posts);
+    $('#columns-area').hidden = true;
+    $('#free-area').hidden = false;
+  }
 }
 
-function renderGroupCol(g, posts) {
-  return `
-    <section class="group-col" data-group-id="${g.groupId}">
-      <header class="group-head">
-        <div>
-          <div class="g-title">${escapeHtml(g.title)}</div>
-          <div class="g-count">${posts.length}개 게시물</div>
+// ----------- 자유 게시 모드 -----------
+function renderFreePosts(posts) {
+  const root = $('#free-area');
+  if (!posts.length) {
+    root.innerHTML = `<div class="free-empty"><strong>아직 게시물이 없습니다.</strong>"+ 게시물 작성"으로 시작하세요.${
+      isAdmin() ? '<br/><br/>조별 컬럼으로 진행하시려면 "+ 8개 조 컬럼 만들기"를 누르세요.' : ''
+    }</div>`;
+    return;
+  }
+  root.innerHTML = posts.map(renderPost).join('');
+  bindPostActions(root);
+}
+
+// ----------- 컬럼 모드 -----------
+function renderColumns(groups, posts) {
+  const root = $('#columns-area');
+  root.innerHTML = groups.map(g => {
+    const groupPosts = posts.filter(p => p.groupId === g.groupId);
+    const titleClass = isAdmin() ? 'c-title editable' : 'c-title';
+    const titleAttr  = isAdmin() ? `data-action="rename" data-id="${g.groupId}" title="클릭하여 이름 수정"` : '';
+    return `
+      <article class="col" data-group-id="${g.groupId}">
+        <header class="col-head">
+          <span class="${titleClass}" ${titleAttr}>${escapeHtml(g.title)}</span>
+          <span class="c-count">${groupPosts.length}</span>
+        </header>
+        <div class="col-body">
+          ${groupPosts.length === 0
+            ? '<div class="col-empty">게시물 없음</div>'
+            : groupPosts.map(renderPost).join('')}
         </div>
-        <button class="btn-primary" data-action="new-post" data-group="${g.groupId}" data-group-title="${escapeHtml(g.title)}">+ 게시</button>
-      </header>
-      <div class="group-body">
-        ${posts.length === 0
-          ? '<p class="muted" style="text-align:center;margin:24px 0;">아직 게시물이 없습니다.</p>'
-          : posts.map(renderPost).join('')}
-      </div>
-    </section>`;
+        <footer class="col-foot">
+          <button class="col-post-btn" data-action="post-to-group" data-group="${g.groupId}" data-group-title="${escapeHtml(g.title)}">+ ${escapeHtml(g.title)}에 게시</button>
+        </footer>
+      </article>`;
+  }).join('');
+  bindPostActions(root);
+
+  // 컬럼 제목 수정 (관리자만)
+  root.querySelectorAll('[data-action="rename"]').forEach(el => {
+    el.addEventListener('click', async () => {
+      const newName = await prompt2('조 이름 수정', '새 조 이름을 입력하세요.', el.textContent.trim());
+      if (!newName || newName === el.textContent.trim()) return;
+      try {
+        await api('group.rename', {
+          semester: state.semester, groupId: el.dataset.id, title: newName,
+          token: state.adminToken
+        });
+        toast('조 이름을 변경했습니다.', 'success');
+        refreshBoard();
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  });
+
+  // 컬럼별 게시 버튼
+  root.querySelectorAll('[data-action="post-to-group"]').forEach(b => {
+    b.addEventListener('click', () => openPostModal(b.dataset.group, b.dataset.groupTitle));
+  });
 }
 
+// ----------- 게시물 카드 -----------
 function renderPost(p) {
   const isInq = p.type === 'inquiry';
   const hidden = p.status === 'hidden' ? ' hidden-post' : '';
+  const adminCls = (p.name === '관리자') ? ' admin-post' : '';
   const stepsHtml = isInq ? `
     <div class="n-steps">
       ${p.step1 ? `<div class="n-step"><b>① 관찰 중 궁금했던 점</b>${escapeHtml(p.step1)}</div>` : ''}
@@ -337,21 +403,25 @@ function renderPost(p) {
       ${p.step4 ? `<div class="n-step"><b>④ AI 답변</b>${escapeHtml(p.step4)}</div>` : ''}
       ${p.step5 ? `<div class="n-step"><b>⑤ 비판적 검토</b>${escapeHtml(p.step5)}</div>` : ''}
     </div>` : '';
-  const isAdmin = !!state.user.admin;
+
+  const authorPill = (p.name === '관리자')
+    ? `<span class="pill pill-admin">관리자</span>`
+    : `<span>${escapeHtml(p.sid)} ${escapeHtml(p.name)}</span>`;
+
   return `
-    <article class="note${hidden}" data-post-id="${p.postId}">
+    <article class="note${hidden}${adminCls}" data-post-id="${p.postId}">
       <div class="n-head">
         <span class="pill ${isInq ? 'pill-lime' : 'pill-mint'}">${isInq ? '탐구' : '일반'}</span>
-        <span>${escapeHtml(p.sid)} ${escapeHtml(p.name)}</span>
+        ${authorPill}
         ${p.status === 'hidden' ? '<span class="pill pill-soft">숨김</span>' : ''}
       </div>
-      <div class="n-title">${escapeHtml(p.title)}</div>
+      ${!isInq && p.title ? `<div class="n-title">${escapeHtml(p.title)}</div>` : ''}
       ${!isInq && p.content ? `<div class="n-content">${escapeHtml(p.content)}</div>` : ''}
       ${stepsHtml}
       ${p.fileUrl ? `<a class="n-file" href="${escapeHtml(p.fileUrl)}" target="_blank" rel="noopener">📎 ${escapeHtml(p.fileName || '첨부파일')}</a>` : ''}
       <div class="n-foot">
         <span>${fmtDate(p.createdAt)}</span>
-        ${isAdmin ? `
+        ${isAdmin() ? `
           <span class="n-actions">
             <button class="mini-btn" data-mod="${p.status === 'hidden' ? 'visible' : 'hidden'}" data-id="${p.postId}">${p.status === 'hidden' ? '공개' : '숨김'}</button>
             <button class="mini-btn danger" data-mod="deleted" data-id="${p.postId}">삭제</button>
@@ -360,49 +430,85 @@ function renderPost(p) {
     </article>`;
 }
 
-function bindGroupEvents() {
-  $$('[data-action="new-post"]').forEach(b => {
-    b.addEventListener('click', () => openPostModal(b.dataset.group, b.dataset.groupTitle));
-  });
-  $$('[data-mod]').forEach(b => {
+function bindPostActions(root) {
+  root.querySelectorAll('[data-mod]').forEach(b => {
     b.addEventListener('click', async () => {
       const status = b.dataset.mod;
       if (status === 'deleted' && !confirm('이 게시물을 삭제할까요?')) return;
       try {
-        await api('post.moderate', { semester: state.semester, postId: b.dataset.id, status, token: state.adminToken });
+        await api('post.moderate', {
+          semester: state.semester, postId: b.dataset.id, status,
+          token: state.adminToken
+        });
         toast('처리되었습니다.', 'success');
-        renderGroupsAndPosts();
+        refreshBoard();
       } catch (e) { toast(e.message, 'error'); }
     });
   });
 }
 
-async function newGroup() {
-  const name = await prompt2('조 만들기', '조 이름을 입력하세요. 예) 1조');
-  if (!name) return;
+// ============================================================
+//  8개 조 컬럼 만들기
+// ============================================================
+async function makeColumns() {
+  if (!confirm('1조부터 8조까지 컬럼을 한 번에 만듭니다. 계속할까요?\n(만든 후에는 컬럼 제목을 클릭해 이름을 수정할 수 있습니다.)')) return;
   try {
-    await api('group.create', { semester: state.semester, activityId: state.cur.activityId, title: name });
-    toast('조를 생성했습니다.', 'success');
-    renderGroupsAndPosts();
+    await api('group.makeColumns', {
+      semester: state.semester, activityId: state.cur.activityId,
+      token: state.adminToken
+    });
+    toast('1조~8조 컬럼이 생성되었습니다.', 'success');
+    refreshBoard();
   } catch (e) { toast(e.message, 'error'); }
 }
 
 // ============================================================
-//  게시물 모달
+//  게시물 작성 모달
 // ============================================================
 let curGroupId = null, curGroupTitle = '';
 let curPostType = 'basic';
 
 function openPostModal(groupId, groupTitle) {
-  if (state.user.admin) return toast('관리자 계정으로는 게시할 수 없습니다.', 'error');
-  curGroupId = groupId; curGroupTitle = groupTitle; curPostType = 'basic';
-  $('#post-author').textContent = `${state.user.sid} ${state.user.name}`;
-  $('#post-group-name').textContent = groupTitle;
+  // 컬럼 모드인데 그룹이 지정되지 않은 경우 → 셀렉트로 선택받기
+  curGroupId = groupId || null;
+  curGroupTitle = groupTitle || '';
+
+  // 작성자 표시
+  if (isAdmin()) {
+    $('#post-author').innerHTML = `<span style="color:var(--c-primary-accent)">관리자</span>`;
+  } else {
+    $('#post-author').textContent = `${state.user.sid} ${state.user.name}`;
+  }
+
+  // 활동 type에 따라 기본 탭 결정
+  if (state.cur.activityType === 'inquiry') {
+    setPostType('inquiry');
+  } else {
+    setPostType('basic');
+  }
+
+  // 컬럼 모드면 셀렉트 표시
+  const wrap = $('#post-group-select-wrap');
+  if (state.cur.columnsCreated && state.cur.groups.length > 0) {
+    wrap.hidden = false;
+    const sel = $('#post-group-select');
+    sel.innerHTML = state.cur.groups.map(g =>
+      `<option value="${g.groupId}" ${g.groupId === curGroupId ? 'selected' : ''}>${escapeHtml(g.title)}</option>`
+    ).join('');
+    if (!curGroupId) curGroupId = state.cur.groups[0].groupId;
+    sel.value = curGroupId;
+    $('#post-target').textContent = curGroupTitle || (state.cur.groups.find(g => g.groupId === curGroupId)?.title || '조 선택');
+  } else {
+    wrap.hidden = true;
+    $('#post-target').textContent = '자유 게시';
+  }
+
+  // 입력 초기화
   $('#post-title').value = '';
   $('#post-content').value = '';
   ['step1','step2','step3','step4','step5'].forEach(id => $('#'+id).value = '');
   $('#post-file').value = '';
-  setPostType('basic');
+
   $('#modal-post').hidden = false;
 }
 
@@ -413,24 +519,46 @@ function setPostType(t) {
 }
 
 async function submitPost() {
-  const title = $('#post-title').value.trim();
-  if (!title) return toast('제목을 입력하세요.', 'error');
+  // 컬럼 모드이면 셀렉트에서 선택된 그룹 사용
+  let groupId = '';
+  if (state.cur.columnsCreated && state.cur.groups.length > 0) {
+    groupId = $('#post-group-select').value;
+  }
 
   const payload = {
     semester: state.semester,
-    groupId: curGroupId,
+    activityId: state.cur.activityId,
+    groupId: groupId,
     sid: state.user.sid, name: state.user.name,
     type: curPostType,
-    title,
-    content: curPostType === 'basic' ? $('#post-content').value.trim() : '',
-    step1: $('#step1').value.trim(),
-    step2: $('#step2').value.trim(),
-    step3: $('#step3').value.trim(),
-    step4: $('#step4').value.trim(),
-    step5: $('#step5').value.trim(),
   };
 
-  // 첨부 파일 (선택)
+  // 일반 게시물 vs 탐구 5단계
+  if (curPostType === 'basic') {
+    const title = $('#post-title').value.trim();
+    if (!title) return toast('제목을 입력하세요.', 'error');
+    payload.title = title;
+    payload.content = $('#post-content').value.trim();
+  } else {
+    payload.title = '';
+    payload.content = '';
+    payload.step1 = $('#step1').value.trim();
+    payload.step2 = $('#step2').value.trim();
+    payload.step3 = $('#step3').value.trim();
+    payload.step4 = $('#step4').value.trim();
+    payload.step5 = $('#step5').value.trim();
+    if (![payload.step1, payload.step2, payload.step3, payload.step4, payload.step5].some(s => s)) {
+      return toast('탐구 5단계 중 적어도 1개 항목을 입력하세요.', 'error');
+    }
+  }
+
+  // 관리자 분기
+  if (isAdmin()) {
+    payload.isAdmin = true;
+    payload.adminToken = state.adminToken;
+  }
+
+  // 파일 첨부 (선택)
   const fileEl = $('#post-file');
   if (fileEl.files && fileEl.files[0]) {
     const f = fileEl.files[0];
@@ -446,7 +574,7 @@ async function submitPost() {
     await api('post.create', payload);
     $('#modal-post').hidden = true;
     toast('게시 완료!', 'success');
-    renderGroupsAndPosts();
+    refreshBoard();
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -463,7 +591,7 @@ function fileToBase64(file) {
 //  CSV 내보내기
 // ============================================================
 async function exportCsv() {
-  if (!state.user.admin) return;
+  if (!isAdmin()) return;
   const scope = state.cur.activityId ? 'activity'
               : state.cur.classId ? 'class' : 'semester';
   const id    = state.cur.activityId || state.cur.classId || '';
@@ -473,7 +601,7 @@ async function exportCsv() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `MAP_${state.semester}_${scope}_${new Date().toISOString().slice(0,10)}.csv`;
+    a.download = `SOCIAL_BOARD_${state.semester}_${scope}_${new Date().toISOString().slice(0,10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     toast(`${r.count}건 내보냈습니다.`, 'success');
@@ -483,14 +611,14 @@ async function exportCsv() {
 // ============================================================
 //  공용 입력 모달
 // ============================================================
-function prompt2(title, desc) {
+function prompt2(title, desc, defaultValue) {
   return new Promise(resolve => {
     $('#prompt-title').textContent = title;
     $('#prompt-desc').textContent = desc;
     const inp = $('#prompt-input');
-    inp.value = '';
+    inp.value = defaultValue || '';
     $('#modal-prompt').hidden = false;
-    setTimeout(() => inp.focus(), 50);
+    setTimeout(() => { inp.focus(); inp.select(); }, 50);
 
     const ok = () => { close(inp.value.trim() || null); };
     const cancel = () => close(null);
@@ -518,8 +646,24 @@ function bindOnce() {
 
   $('#btn-new-class').addEventListener('click', newClass);
   $('#btn-new-activity').addEventListener('click', newActivity);
-  $('#btn-new-group').addEventListener('click', newGroup);
+  $('#btn-make-columns').addEventListener('click', makeColumns);
   $('#btn-export').addEventListener('click', exportCsv);
+
+  // 보드의 "+ 게시물 작성" 버튼 — 자유게시 또는 컬럼 모드 셀렉트로
+  $('#btn-new-post').addEventListener('click', () => {
+    if (state.cur.columnsCreated && state.cur.groups.length > 0) {
+      openPostModal(state.cur.groups[0].groupId, state.cur.groups[0].title);
+    } else {
+      openPostModal(null, '');
+    }
+  });
+
+  // 컬럼 셀렉트 변경
+  $('#post-group-select').addEventListener('change', e => {
+    curGroupId = e.target.value;
+    const g = state.cur.groups.find(x => x.groupId === curGroupId);
+    $('#post-target').textContent = g ? g.title : '조 선택';
+  });
 
   // 뒤로 가기
   $$('[data-back]').forEach(b => {
