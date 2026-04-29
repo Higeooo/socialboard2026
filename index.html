@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MAP — 모둠 활동 플랫폼</title>
+  <title>SOCIAL BOARD</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -15,8 +15,7 @@
   <nav id="topbar" class="topbar" hidden>
     <div class="brand">
       <span class="brand-mark">●</span>
-      <span class="brand-name">MAP</span>
-      <span class="brand-sub">Modum Activity Platform</span>
+      <span class="brand-name">SOCIAL BOARD</span>
     </div>
     <div class="topbar-right">
       <span id="semester-pill" class="pill pill-mint">2026-1학기</span>
@@ -31,8 +30,8 @@
   <!-- ======================== 1. 로그인 ======================== -->
   <main id="screen-login" class="screen screen-login">
     <header class="login-hero">
-      <h1 class="display">MAP<span class="dot">.</span></h1>
-      <p class="lede">모둠 활동의 흐름을 한 화면에. 학번과 이름으로 시작하세요.</p>
+      <h1 class="display">SOCIAL<br/>BOARD<span class="dot">.</span></h1>
+      <p class="lede">학생들의 생각이 모이는 곳. 학번과 이름으로 시작하세요.</p>
     </header>
 
     <div class="login-grid">
@@ -52,7 +51,7 @@
 
       <section class="card card-alt">
         <h2 class="card-title">관리자 로그인</h2>
-        <p class="muted">반·활동 생성, 게시물 모더레이션, 결과물 일괄 다운로드.</p>
+        <p class="muted">반·활동 생성, 게시물 작성·모더레이션, 결과물 일괄 다운로드.</p>
         <label class="field">
           <span>아이디</span>
           <input type="text" id="admin-id" placeholder="관리자 아이디" />
@@ -66,7 +65,7 @@
     </div>
 
     <footer class="login-footer">
-      <span class="dim">© Gimhae Yulha High School · MAP v0.1</span>
+      <span class="dim">© Gimhae Yulha High School · SOCIAL BOARD v2</span>
     </footer>
   </main>
 
@@ -99,21 +98,26 @@
     <section id="activity-list" class="stack"></section>
   </main>
 
-  <!-- ======================== 4. 모둠 / 보드 ======================== -->
-  <main id="screen-board" class="screen container" hidden>
-    <header class="page-head">
+  <!-- ======================== 4. 보드 (자유게시 OR 8 컬럼) ======================== -->
+  <main id="screen-board" class="screen board-screen" hidden>
+    <header class="page-head container">
       <button class="btn-back" data-back="activities">← 활동 목록</button>
       <div>
         <h2 class="h2" id="cur-activity-title">활동</h2>
         <p class="muted" id="cur-activity-sub"></p>
       </div>
       <div class="head-actions">
-        <button id="btn-new-group" class="btn-secondary">+ 조 만들기</button>
+        <button id="btn-make-columns" class="btn-secondary" hidden>+ 8개 조 컬럼 만들기</button>
+        <button id="btn-new-post" class="btn-primary">+ 게시물 작성</button>
         <button id="btn-export" class="btn-ghost" hidden>⇩ CSV 내보내기</button>
       </div>
     </header>
 
-    <section id="groups-area" class="groups-area"></section>
+    <!-- 자유 게시 모드: 단일 영역 -->
+    <section id="free-area" class="container free-area" hidden></section>
+
+    <!-- 컬럼 모드: 가로 스크롤 -->
+    <section id="columns-area" class="columns-area" hidden></section>
   </main>
 
   <!-- ======================== 게시물 작성 모달 ======================== -->
@@ -131,22 +135,29 @@
 
       <div class="modal-body">
         <div class="meta-line">
-          <span class="pill pill-mint" id="post-author">학번 이름</span>
-          <span class="pill pill-soft" id="post-group-name">조</span>
+          <span class="pill pill-mint" id="post-author">작성자</span>
+          <span class="pill pill-soft" id="post-target">조</span>
         </div>
 
-        <label class="field">
-          <span>제목</span>
-          <input type="text" id="post-title" placeholder="주제를 입력하세요" />
+        <!-- 컬럼 선택 (컬럼 모드일 때만) -->
+        <label class="field" id="post-group-select-wrap" hidden>
+          <span>게시할 조</span>
+          <select id="post-group-select"></select>
         </label>
 
-        <!-- 일반 -->
-        <label class="field" data-show="basic">
-          <span>내용</span>
-          <textarea id="post-content" rows="6" placeholder="게시물 내용을 입력하세요."></textarea>
-        </label>
+        <!-- 일반 게시물 영역 -->
+        <div data-show="basic">
+          <label class="field">
+            <span>제목</span>
+            <input type="text" id="post-title" placeholder="주제를 입력하세요" />
+          </label>
+          <label class="field">
+            <span>내용</span>
+            <textarea id="post-content" rows="6" placeholder="게시물 내용을 입력하세요."></textarea>
+          </label>
+        </div>
 
-        <!-- 탐구 5단계 -->
+        <!-- 탐구 5단계 영역 (제목 필드 없음) -->
         <div data-show="inquiry" class="inquiry-stack" hidden>
           <div class="step-card">
             <span class="step-num">1</span>
@@ -198,7 +209,7 @@
     </div>
   </div>
 
-  <!-- ======================== 공용 입력 모달 (이름 받기) ======================== -->
+  <!-- ======================== 공용 입력 모달 ======================== -->
   <div id="modal-prompt" class="modal" hidden>
     <div class="modal-card narrow">
       <header class="modal-head">
